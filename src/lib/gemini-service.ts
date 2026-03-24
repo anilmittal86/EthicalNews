@@ -13,29 +13,55 @@ interface ClusterResult {
   }>;
 }
 
-const CLUSTERING_PROMPT = `Group these financial news headlines by topic/story.
+const CLUSTERING_PROMPT = `You are a news editor. Group these financial news headlines by topic/story.
 
-Headlines:
+HEADLINES:
 {headlines}
 
-Return valid JSON only:
-{"clusters":[{"title":"Story title","headlineIndices":[0,2,5],"keyEvent":"What happened"}]}
+TASK: Identify groups of headlines that cover the same event/news story. Each group should contain headlines from different sources about the same topic.
 
-Rules:
-- Group same events together
-- Title must be factual, neutral
-- headlineIndices must be valid (0 to N-1)
-- Cover ALL headlines`;
+OUTPUT FORMAT: Return ONLY valid JSON, no other text.
+{
+  "clusters": [
+    {
+      "title": "Brief factual title for this story (max 10 words)",
+      "headlineIndices": [0, 3, 7],
+      "keyEvent": "One sentence describing what happened"
+    }
+  ]
+}
 
-const SUMMARY_PROMPT = `Write a neutral 2-3 sentence summary for this news story, then assess if coverage shows notable bias.
+RULES:
+- Group headlines about the same event/story together
+- Title must be factual, neutral, no opinion words
+- headlineIndices must be valid integers from 0 to {totalHeadlinesMinus1}
+- Every headline index from 0 to {totalHeadlinesMinus1} must appear in exactly one cluster
+- Create as few clusters as possible while keeping related stories together
 
-Story: {title}
-Headlines ({sourceCount} sources): {headlines}
+EXAMPLE OUTPUT:
+{"clusters":[{"title":"Oil Prices Rise on OPEC Decision","headlineIndices":[0,2,5],"keyEvent":"OPEC announced production cuts causing oil prices to rise 5%"}]}`;
 
-Return valid JSON only:
-{"summary":"neutral summary","showBiasNote":false,"biasNote":""}
+const SUMMARY_PROMPT = `Write a neutral news summary and assess coverage tone.
 
-showBiasNote=true only if coverage uses emotional language or one-sided framing.`;
+STORY: {title}
+HEADLINES FROM {sourceCount} SOURCES: {headlines}
+
+TASK:
+1. Write a 2-3 sentence neutral summary of what happened based on these headlines
+2. Assess if the coverage shows notable bias or sensationalism
+
+OUTPUT FORMAT: Return ONLY valid JSON, no other text.
+{
+  "summary": "Neutral summary text (2-3 sentences)",
+  "showBiasNote": false,
+  "biasNote": ""
+}
+
+RULES:
+- Summary must be factual, no opinions or speculation
+- showBiasNote should be true ONLY if headlines use emotional/exaggerated language or present one-sided view
+- biasNote should briefly explain the tone issue if showBiasNote is true
+- Keep summary concise and informative`;
 
 export async function analyzeHeadlineBias(
   headline: string,
@@ -102,18 +128,29 @@ export async function clusterHeadlines(
   }
 
   const headlinesText = news
-    .map((item, idx) => `${idx}. [${item.source}] ${item.title}`)
+    .map((item, idx) => `[${idx}] ${item.source}: ${item.title}`)
     .join("\n");
 
-  const prompt = CLUSTERING_PROMPT.replace("{headlines}", headlinesText);
+  const prompt = CLUSTERING_PROMPT
+    .replace("{headlines}", headlinesText)
+    .replace(/\{totalHeadlinesMinus1\}/g, String(news.length - 1));
 
   try {
     const response = await callGemini(prompt);
-    console.log("Clustering response:", response.substring(0, 500));
+    console.log("Clustering raw response:", response);
     
     const result = parseJsonResponse<ClusterResult>(response, { clusters: [] });
+    console.log("Clustering parsed result:", JSON.stringify(result));
+
+    if (!result.clusters || result.clusters.length === 0) {
+      console.log("No clusters found in response");
+      return { clusters: [] };
+    }
 
     for (const cluster of result.clusters) {
+      if (!cluster.headlineIndices) {
+        cluster.headlineIndices = [];
+      }
       cluster.headlineIndices = cluster.headlineIndices.filter(
         (idx) => idx >= 0 && idx < news.length
       );
