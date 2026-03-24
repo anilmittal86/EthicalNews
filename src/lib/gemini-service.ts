@@ -31,11 +31,12 @@ Rules:
 - Indices must be 0 to {maxIndex}
 - Keep title factual, no opinions`;
 
-const SIMPLE_CLUSTERING_PROMPT = `Simple task: Group these headlines by topic.
+const SIMPLE_CLUSTERING_PROMPT = `Group these headlines into topics. Return ONLY JSON array.
 
+Headlines:
 {headlines}
 
-Return JSON: [{"title":"Topic","indices":[0,2,5],"event":"What happened"}]`;
+Format: [{"title":"title","indices":[0,2,5],"event":"what happened"}]`;
 
 export async function analyzeHeadlineBias(
   headline: string,
@@ -70,14 +71,33 @@ Source: ${source}
   }
 }
 
-export async function callGemini(prompt: string): Promise<string> {
+export async function callGemini(prompt: string, maxRetries = 3): Promise<string> {
   if (!process.env.GEMINI_API_KEY) {
     throw new Error("GEMINI_API_KEY not set");
   }
 
-  const model = genAI.getGenerativeModel({ model: MODEL_NAME });
-  const result = await model.generateContent(prompt);
-  return result.response.text().trim();
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const model = genAI.getGenerativeModel({ model: MODEL_NAME });
+      const result = await model.generateContent(prompt);
+      return result.response.text().trim();
+    } catch (error: any) {
+      lastError = error;
+      const errorMsg = error.message || String(error);
+      
+      if (errorMsg.includes('503') || errorMsg.includes('429') || errorMsg.includes('rate limit')) {
+        const delay = Math.pow(2, attempt) * 1000;
+        console.log(`Attempt ${attempt + 1} failed, retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        throw error;
+      }
+    }
+  }
+  
+  throw lastError || new Error("Max retries exceeded");
 }
 
 function parseClusterResponse(text: string): { clusters: Array<{ title: string; headlineIndices: number[]; keyEvent: string }> } {
