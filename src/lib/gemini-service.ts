@@ -70,7 +70,7 @@ Source: ${source}
   }
 }
 
-async function callGemini(prompt: string): Promise<string> {
+export async function callGemini(prompt: string): Promise<string> {
   if (!process.env.GEMINI_API_KEY) {
     throw new Error("GEMINI_API_KEY not set");
   }
