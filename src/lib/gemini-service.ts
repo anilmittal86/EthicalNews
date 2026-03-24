@@ -3,7 +3,7 @@ import { NewsItem, StoryCluster, ArticleLink } from "./types";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
-const MODEL_NAME = "gemini-1.5-flash";
+const MODEL_NAME = "gemini-2.0-flash";
 
 export interface BiasAnalysisResult {
   headline: string;
