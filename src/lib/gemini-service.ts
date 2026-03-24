@@ -5,15 +5,6 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
 const MODEL_NAME = "gemini-2.0-flash";
 
-export interface BiasAnalysisResult {
-  headline: string;
-  source: string;
-  biasNote: string;
-  biasLevel: "low" | "medium" | "high";
-  indicators: string[];
-  isSensationalist: boolean;
-}
-
 interface ClusterResult {
   clusters: Array<{
     title: string;
@@ -22,50 +13,64 @@ interface ClusterResult {
   }>;
 }
 
-const CLUSTERING_PROMPT = `You are a news editor organizing financial news stories. Group these headlines by topic/story.
+const CLUSTERING_PROMPT = `Group these financial news headlines by topic/story.
 
 Headlines:
 {headlines}
 
-Respond ONLY with valid JSON (no markdown):
-{
-  "clusters": [
-    {
-      "title": "Neutral, factual title for this story",
-      "headlineIndices": [0, 2, 5],
-      "keyEvent": "Brief description of what happened (1-2 sentences)"
-    }
-  ]
-}
+Return valid JSON only:
+{"clusters":[{"title":"Story title","headlineIndices":[0,2,5],"keyEvent":"What happened"}]}
 
 Rules:
-- Group headlines about the same event/story together
-- Title should be factual, neutral - avoid loaded words
-- Minimum 2 headlines per cluster (single-source stories get single-item clusters)
-- headlineIndices must reference valid indices from the input
-- Cover all headlines - no orphaned headlines`;
+- Group same events together
+- Title must be factual, neutral
+- headlineIndices must be valid (0 to N-1)
+- Cover ALL headlines`;
 
-const SUMMARY_PROMPT = `You are writing a neutral news summary for a curated financial news briefing.
+const SUMMARY_PROMPT = `Write a neutral 2-3 sentence summary for this news story, then assess if coverage shows notable bias.
 
 Story: {title}
-Key Event: {keyEvent}
-Headlines from {sourceCount} sources: {headlines}
+Headlines ({sourceCount} sources): {headlines}
 
-Tasks:
-1. Write a 2-3 sentence neutral summary of what happened
-2. Assess if any coverage shows notable bias or sensationalism
+Return valid JSON only:
+{"summary":"neutral summary","showBiasNote":false,"biasNote":""}
 
-Respond ONLY with valid JSON:
-{
-  "summary": "Neutral summary text (2-3 sentences)",
-  "showBiasNote": true or false,
-  "biasNote": "Brief note about coverage tone if notable, else empty string"
+showBiasNote=true only if coverage uses emotional language or one-sided framing.`;
+
+export async function analyzeHeadlineBias(
+  headline: string,
+  source: string
+): Promise<{ biasNote: string; biasLevel: "low" | "medium" | "high" }> {
+  if (!process.env.GEMINI_API_KEY) {
+    return { biasNote: "API not configured", biasLevel: "medium" };
+  }
+
+  try {
+    const model = genAI.getGenerativeModel({ model: MODEL_NAME });
+    const prompt = `Analyze this financial news headline for bias. Return JSON only.
+
+Headline: "${headline}"
+Source: ${source}
+
+{"biasNote":"brief note","biasLevel":"low|medium|high"}`;
+
+    const response = await callGemini(prompt);
+    const result = parseJsonResponse<{ biasNote: string; biasLevel: string }>(
+      response,
+      { biasNote: "Analysis unavailable", biasLevel: "medium" }
+    );
+
+    return {
+      biasNote: result.biasNote,
+      biasLevel: ["low", "medium", "high"].includes(result.biasLevel)
+        ? result.biasLevel as "low" | "medium" | "high"
+        : "medium",
+    };
+  } catch (error) {
+    console.error("Error analyzing bias:", error);
+    return { biasNote: "Error analyzing", biasLevel: "medium" };
+  }
 }
-
-Rules:
-- Summary must be factual, neutral, no opinion
-- showBiasNote: true only if coverage has notable emotional language or one-sided framing
-- If all sources are balanced, showBiasNote should be false`;
 
 async function callGemini(prompt: string): Promise<string> {
   if (!process.env.GEMINI_API_KEY) {
@@ -89,76 +94,6 @@ function parseJsonResponse<T>(text: string, defaultValue: T): T {
   return defaultValue;
 }
 
-export async function analyzeHeadlineBias(
-  headline: string,
-  source: string
-): Promise<BiasAnalysisResult> {
-  if (!process.env.GEMINI_API_KEY) {
-    return {
-      headline,
-      source,
-      biasNote: "API not configured",
-      biasLevel: "medium",
-      indicators: [],
-      isSensationalist: false,
-    };
-  }
-
-  try {
-    const model = genAI.getGenerativeModel({ model: MODEL_NAME });
-    const prompt = `Analyze this financial news headline for bias.
-
-Headline: "${headline}"
-Source: ${source}
-
-Respond ONLY with valid JSON:
-{
-  "biasNote": "Brief explanation (1-2 sentences)",
-  "biasLevel": "low" or "medium" or "high",
-  "indicators": ["specific phrases or techniques detected"],
-  "isSensationalist": true or false
-}
-
-Low = balanced, factual. Medium = minor framing. High = clear bias or sensationalism.`;
-
-    const result = await model.generateContent(prompt);
-    const text = result.response.text().trim();
-
-    const parsed = parseJsonResponse<{
-      biasNote: string;
-      biasLevel: string;
-      indicators: string[];
-      isSensationalist: boolean;
-    }>(text, {
-      biasNote: "Analysis unavailable",
-      biasLevel: "medium",
-      indicators: [],
-      isSensationalist: false,
-    });
-
-    return {
-      headline,
-      source,
-      biasNote: parsed.biasNote,
-      biasLevel: ["low", "medium", "high"].includes(parsed.biasLevel)
-        ? parsed.biasLevel as "low" | "medium" | "high"
-        : "medium",
-      indicators: Array.isArray(parsed.indicators) ? parsed.indicators : [],
-      isSensationalist: Boolean(parsed.isSensationalist),
-    };
-  } catch (error) {
-    console.error("Error analyzing bias:", error);
-    return {
-      headline,
-      source,
-      biasNote: "Error analyzing",
-      biasLevel: "medium",
-      indicators: [],
-      isSensationalist: false,
-    };
-  }
-}
-
 export async function clusterHeadlines(
   news: NewsItem[]
 ): Promise<ClusterResult> {
@@ -174,6 +109,8 @@ export async function clusterHeadlines(
 
   try {
     const response = await callGemini(prompt);
+    console.log("Clustering response:", response.substring(0, 500));
+    
     const result = parseJsonResponse<ClusterResult>(response, { clusters: [] });
 
     for (const cluster of result.clusters) {
@@ -227,6 +164,48 @@ export async function generateClusterSummary(
   }
 }
 
+function buildFallbackClusters(news: NewsItem[]): StoryCluster[] {
+  const groupedBySource = new Map<string, NewsItem[]>();
+  
+  for (const item of news) {
+    const source = item.source;
+    if (!groupedBySource.has(source)) {
+      groupedBySource.set(source, []);
+    }
+    groupedBySource.get(source)!.push(item);
+  }
+
+  const clusters: StoryCluster[] = [];
+  let idx = 0;
+  
+  groupedBySource.forEach((items) => {
+    if (items.length === 0) return;
+    
+    const articles: ArticleLink[] = items.map((item) => ({
+      source: item.source,
+      headline: item.title,
+      url: item.link,
+      biasLevel: "medium" as const,
+    }));
+
+    const sources = [...new Set(articles.map((a) => a.source))];
+
+    clusters.push({
+      id: `cluster-${idx++}`,
+      title: items[0].title.substring(0, 80) + (items[0].title.length > 80 ? "..." : ""),
+      summary: `${items.length} article${items.length > 1 ? "s" : ""} from ${sources.join(", ")}`,
+      keyEvent: items[0].title,
+      sources,
+      sourceCount: sources.length,
+      articles,
+      showBiasNote: false,
+      biasNote: "",
+    });
+  });
+
+  return clusters.slice(0, 10);
+}
+
 export async function buildStoryClusters(
   news: NewsItem[]
 ): Promise<StoryCluster[]> {
@@ -234,16 +213,26 @@ export async function buildStoryClusters(
 
   const clusterResult = await clusterHeadlines(news);
 
+  if (clusterResult.clusters.length === 0) {
+    console.log("Gemini clustering failed, using fallback");
+    return buildFallbackClusters(news);
+  }
+
   const clusters: StoryCluster[] = [];
 
   for (let i = 0; i < clusterResult.clusters.length; i++) {
     const cluster = clusterResult.clusters[i];
-    const articles: ArticleLink[] = cluster.headlineIndices.map((idx) => ({
-      source: news[idx].source,
-      headline: news[idx].title,
-      url: news[idx].link,
-      biasLevel: "medium",
-    }));
+    
+    if (cluster.headlineIndices.length === 0) continue;
+
+    const articles: ArticleLink[] = cluster.headlineIndices
+      .filter((idx) => idx >= 0 && idx < news.length)
+      .map((idx) => ({
+        source: news[idx].source,
+        headline: news[idx].title,
+        url: news[idx].link,
+        biasLevel: "medium" as const,
+      }));
 
     const sources = [...new Set(articles.map((a) => a.source))];
 
