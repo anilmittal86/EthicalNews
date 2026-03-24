@@ -74,7 +74,7 @@ export async function fetchNewsFromSource(
     const items: NewsItem[] = (feed.items || [])
       .slice(0, limit)
       .map((item) => ({
-        title: item.title || "No title",
+        title: item.title?.replace(/<[^>]*>/g, "").trim() || "No title",
         link: item.link || "",
         pubDate: item.pubDate || item.isoDate || new Date().toISOString(),
         source: source.name,
