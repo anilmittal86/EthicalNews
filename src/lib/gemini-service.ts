@@ -13,55 +13,29 @@ interface ClusterResult {
   }>;
 }
 
-const CLUSTERING_PROMPT = `You are a news editor. Group these financial news headlines by topic/story.
+const CLUSTERING_PROMPT = `Group these financial news headlines into topics. Each topic should have headlines about the same story.
 
-HEADLINES:
+HEADLINES (index - source - title):
 {headlines}
 
-TASK: Identify groups of headlines that cover the same event/news story. Each group should contain headlines from different sources about the same topic.
+Return ONLY valid JSON array. Each cluster needs:
+- title: Brief neutral title (max 8 words)
+- headlineIndices: Array of headline numbers
+- keyEvent: One sentence about what happened
 
-OUTPUT FORMAT: Return ONLY valid JSON, no other text.
-{
-  "clusters": [
-    {
-      "title": "Brief factual title for this story (max 10 words)",
-      "headlineIndices": [0, 3, 7],
-      "keyEvent": "One sentence describing what happened"
-    }
-  ]
-}
+Example: [{"title":"Oil Prices Rise","headlineIndices":[0,3,7],"keyEvent":"Oil prices rose 5% after OPEC announcement"}]
 
-RULES:
-- Group headlines about the same event/story together
-- Title must be factual, neutral, no opinion words
-- headlineIndices must be valid integers from 0 to {totalHeadlinesMinus1}
-- Every headline index from 0 to {totalHeadlinesMinus1} must appear in exactly one cluster
-- Create as few clusters as possible while keeping related stories together
+Rules:
+- Group headlines about same event
+- Every headline index must be in exactly one cluster
+- Indices must be 0 to {maxIndex}
+- Keep title factual, no opinions`;
 
-EXAMPLE OUTPUT:
-{"clusters":[{"title":"Oil Prices Rise on OPEC Decision","headlineIndices":[0,2,5],"keyEvent":"OPEC announced production cuts causing oil prices to rise 5%"}]}`;
+const SIMPLE_CLUSTERING_PROMPT = `Simple task: Group these headlines by topic.
 
-const SUMMARY_PROMPT = `Write a neutral news summary and assess coverage tone.
+{headlines}
 
-STORY: {title}
-HEADLINES FROM {sourceCount} SOURCES: {headlines}
-
-TASK:
-1. Write a 2-3 sentence neutral summary of what happened based on these headlines
-2. Assess if the coverage shows notable bias or sensationalism
-
-OUTPUT FORMAT: Return ONLY valid JSON, no other text.
-{
-  "summary": "Neutral summary text (2-3 sentences)",
-  "showBiasNote": false,
-  "biasNote": ""
-}
-
-RULES:
-- Summary must be factual, no opinions or speculation
-- showBiasNote should be true ONLY if headlines use emotional/exaggerated language or present one-sided view
-- biasNote should briefly explain the tone issue if showBiasNote is true
-- Keep summary concise and informative`;
+Return JSON: [{"title":"Topic","indices":[0,2,5],"event":"What happened"}]`;
 
 export async function analyzeHeadlineBias(
   headline: string,
@@ -72,13 +46,12 @@ export async function analyzeHeadlineBias(
   }
 
   try {
-    const model = genAI.getGenerativeModel({ model: MODEL_NAME });
-    const prompt = `Analyze this financial news headline for bias. Return JSON only.
+    const prompt = `Analyze for bias. Return JSON.
 
 Headline: "${headline}"
 Source: ${source}
 
-{"biasNote":"brief note","biasLevel":"low|medium|high"}`;
+{"biasNote":"brief","biasLevel":"low|medium|high"}`;
 
     const response = await callGemini(prompt);
     const result = parseJsonResponse<{ biasNote: string; biasLevel: string }>(
@@ -93,8 +66,7 @@ Source: ${source}
         : "medium",
     };
   } catch (error) {
-    console.error("Error analyzing bias:", error);
-    return { biasNote: "Error analyzing", biasLevel: "medium" };
+    return { biasNote: "Error", biasLevel: "medium" };
   }
 }
 
@@ -110,9 +82,18 @@ async function callGemini(prompt: string): Promise<string> {
 
 function parseJsonResponse<T>(text: string, defaultValue: T): T {
   try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
+    const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => ({
+          title: item.title || "",
+          headlineIndices: item.headlineIndices || item.indices || [],
+          keyEvent: item.keyEvent || item.event || "",
+        })) as unknown as T;
+      }
+      return parsed as T;
     }
   } catch (error) {
     console.error("JSON parse error:", error);
@@ -120,47 +101,54 @@ function parseJsonResponse<T>(text: string, defaultValue: T): T {
   return defaultValue;
 }
 
-export async function clusterHeadlines(
-  news: NewsItem[]
-): Promise<ClusterResult> {
-  if (news.length === 0) {
-    return { clusters: [] };
-  }
+async function clusterWithRetry(news: NewsItem[], retryCount = 0): Promise<ClusterResult> {
+  if (news.length === 0) return { clusters: [] };
 
   const headlinesText = news
-    .map((item, idx) => `[${idx}] ${item.source}: ${item.title}`)
+    .map((item, idx) => `${idx} - ${item.source}: ${item.title}`)
     .join("\n");
 
-  const prompt = CLUSTERING_PROMPT
-    .replace("{headlines}", headlinesText)
-    .replace(/\{totalHeadlinesMinus1\}/g, String(news.length - 1));
+  const prompt = retryCount === 0
+    ? CLUSTERING_PROMPT.replace("{headlines}", headlinesText).replace("{maxIndex}", String(news.length - 1))
+    : SIMPLE_CLUSTERING_PROMPT.replace("{headlines}", headlinesText);
 
   try {
     const response = await callGemini(prompt);
-    console.log("Clustering raw response:", response);
-    
-    const result = parseJsonResponse<ClusterResult>(response, { clusters: [] });
-    console.log("Clustering parsed result:", JSON.stringify(result));
+    console.log(`Clustering response (attempt ${retryCount + 1}):`, response.substring(0, 300));
 
-    if (!result.clusters || result.clusters.length === 0) {
-      console.log("No clusters found in response");
+    const result = parseJsonResponse<ClusterResult>(response, { clusters: [] });
+
+    if (!result.clusters || result.clusters.length === 0 || !Array.isArray(result.clusters)) {
+      if (retryCount < 2) {
+        console.log(`Retrying with simpler prompt (attempt ${retryCount + 2})`);
+        return clusterWithRetry(news, retryCount + 1);
+      }
       return { clusters: [] };
     }
 
-    for (const cluster of result.clusters) {
-      if (!cluster.headlineIndices) {
-        cluster.headlineIndices = [];
-      }
-      cluster.headlineIndices = cluster.headlineIndices.filter(
-        (idx) => idx >= 0 && idx < news.length
-      );
-    }
+    const validClusters = result.clusters
+      .filter((c) => c.headlineIndices && c.headlineIndices.length > 0)
+      .map((c) => ({
+        title: c.title || "News Update",
+        headlineIndices: c.headlineIndices.filter((idx) => idx >= 0 && idx < news.length),
+        keyEvent: c.keyEvent || "",
+      }))
+      .filter((c) => c.headlineIndices.length > 0);
 
-    return result;
+    return { clusters: validClusters };
   } catch (error) {
-    console.error("Error clustering headlines:", error);
+    console.error("Clustering error:", error);
+    if (retryCount < 2) {
+      console.log(`Retrying after error (attempt ${retryCount + 2})`);
+      return clusterWithRetry(news, retryCount + 1);
+    }
     return { clusters: [] };
   }
+}
+
+export async function clusterHeadlines(news: NewsItem[]): Promise<ClusterResult> {
+  const limitedNews = news.slice(0, 20);
+  return clusterWithRetry(limitedNews);
 }
 
 export async function generateClusterSummary(
@@ -169,22 +157,24 @@ export async function generateClusterSummary(
   headlines: string[],
   sourceCount: number
 ): Promise<{ summary: string; showBiasNote: boolean; biasNote: string }> {
-  const prompt = SUMMARY_PROMPT.replace("{title}", title)
-    .replace("{keyEvent}", keyEvent)
-    .replace("{sourceCount}", sourceCount.toString())
-    .replace("{headlines}", headlines.join("; "));
+  const prompt = `Write 2 sentences of neutral news summary for Indian corporate readers.
+
+Story: ${title}
+Key event: ${keyEvent}
+Sources: ${sourceCount}
+
+Return JSON: {"summary":"text","showBiasNote":false,"biasNote":""}
+
+Rules:
+- Summary factual, professional tone
+- showBiasNote=true only if headlines use emotional language`;
 
   try {
     const response = await callGemini(prompt);
-    const result = parseJsonResponse<{
-      summary: string;
-      showBiasNote: boolean;
-      biasNote: string;
-    }>(response, {
-      summary: keyEvent,
-      showBiasNote: false,
-      biasNote: "",
-    });
+    const result = parseJsonResponse<{ summary: string; showBiasNote: boolean; biasNote: string }>(
+      response,
+      { summary: keyEvent, showBiasNote: false, biasNote: "" }
+    );
 
     return {
       summary: result.summary || keyEvent,
@@ -192,66 +182,54 @@ export async function generateClusterSummary(
       biasNote: result.biasNote || "",
     };
   } catch (error) {
-    console.error("Error generating summary:", error);
-    return {
-      summary: keyEvent,
-      showBiasNote: false,
-      biasNote: "",
-    };
+    console.error("Summary error:", error);
+    return { summary: keyEvent, showBiasNote: false, biasNote: "" };
   }
 }
 
 function buildFallbackClusters(news: NewsItem[]): StoryCluster[] {
-  const groupedBySource = new Map<string, NewsItem[]>();
-  
-  for (const item of news) {
-    const source = item.source;
-    if (!groupedBySource.has(source)) {
-      groupedBySource.set(source, []);
-    }
-    groupedBySource.get(source)!.push(item);
-  }
-
+  const seen = new Set<string>();
   const clusters: StoryCluster[] = [];
-  let idx = 0;
-  
-  groupedBySource.forEach((items) => {
-    if (items.length === 0) return;
+
+  for (let i = 0; i < Math.min(news.length, 20); i++) {
+    const item = news[i];
+    const key = item.title.substring(0, 50).toLowerCase();
     
-    const articles: ArticleLink[] = items.map((item) => ({
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const article: ArticleLink = {
       source: item.source,
       headline: item.title,
       url: item.link,
-      biasLevel: "medium" as const,
-    }));
-
-    const sources = [...new Set(articles.map((a) => a.source))];
+      biasLevel: "medium",
+    };
 
     clusters.push({
-      id: `cluster-${idx++}`,
-      title: items[0].title.substring(0, 80) + (items[0].title.length > 80 ? "..." : ""),
-      summary: `${items.length} article${items.length > 1 ? "s" : ""} from ${sources.join(", ")}`,
-      keyEvent: items[0].title,
-      sources,
-      sourceCount: sources.length,
-      articles,
+      id: `cluster-${clusters.length}`,
+      title: item.title.substring(0, 80) + (item.title.length > 80 ? "..." : ""),
+      summary: `Latest update from ${item.source}`,
+      keyEvent: item.title,
+      sources: [item.source],
+      sourceCount: 1,
+      articles: [article],
       showBiasNote: false,
       biasNote: "",
     });
-  });
 
-  return clusters.slice(0, 10);
+    if (clusters.length >= 10) break;
+  }
+
+  return clusters;
 }
 
-export async function buildStoryClusters(
-  news: NewsItem[]
-): Promise<StoryCluster[]> {
+export async function buildStoryClusters(news: NewsItem[]): Promise<StoryCluster[]> {
   if (news.length === 0) return [];
 
   const clusterResult = await clusterHeadlines(news);
 
   if (clusterResult.clusters.length === 0) {
-    console.log("Gemini clustering failed, using fallback");
+    console.log("Using fallback clustering");
     return buildFallbackClusters(news);
   }
 
@@ -259,7 +237,6 @@ export async function buildStoryClusters(
 
   for (let i = 0; i < clusterResult.clusters.length; i++) {
     const cluster = clusterResult.clusters[i];
-    
     if (cluster.headlineIndices.length === 0) continue;
 
     const articles: ArticleLink[] = cluster.headlineIndices

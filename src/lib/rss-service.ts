@@ -29,6 +29,11 @@ export const financeSources: NewsSource[] = [
     category: "finance",
   },
   {
+    name: "Reuters India",
+    url: "https://feeds.reuters.com/reuters/technologyBusiness",
+    category: "finance",
+  },
+  {
     name: "Bloomberg Markets",
     url: "https://feeds.bloomberg.com/markets/news.rss",
     category: "finance",
@@ -47,6 +52,16 @@ export const financeSources: NewsSource[] = [
     name: "Yahoo Finance",
     url: "https://finance.yahoo.com/news/rssindex",
     category: "finance",
+  },
+  {
+    name: "MoneyControl",
+    url: "https://www.moneycontrol.com/rss/latestnews.xml",
+    category: "india",
+  },
+  {
+    name: "The Economic Times",
+    url: "https://economictimes.indiatimes.com/rssfeedstopstories.cms",
+    category: "india",
   },
 ];
 
