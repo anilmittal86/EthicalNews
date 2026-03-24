@@ -17,25 +17,44 @@ export interface NewsItem {
   biasAnalysis?: BiasAnalysis;
 }
 
-export interface NewsResponse {
-  news: NewsItem[];
+export interface ArticleLink {
+  source: string;
+  headline: string;
+  url: string;
+  biasLevel: "low" | "medium" | "high";
+}
+
+export interface StoryCluster {
+  id: string;
+  title: string;
+  summary: string;
+  keyEvent: string;
+  sources: string[];
+  sourceCount: number;
+  articles: ArticleLink[];
+  showBiasNote: boolean;
+  biasNote?: string;
+}
+
+export interface StoriesResponse {
+  stories: StoryCluster[];
   count: number;
   timestamp: string;
 }
 
-export async function getNewsWithAnalysis(): Promise<NewsResponse> {
+export async function getStories(): Promise<StoriesResponse> {
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
   try {
-    const res = await fetch(`${baseUrl}/api/news-with-analysis`, {
+    const res = await fetch(`${baseUrl}/api/stories`, {
       cache: "no-store",
       next: { revalidate: 0 },
     });
     if (!res.ok) {
-      throw new Error("Failed to fetch news");
+      throw new Error("Failed to fetch stories");
     }
     return res.json();
   } catch (error) {
-    console.error("Error fetching news:", error);
-    return { news: [], count: 0, timestamp: new Date().toISOString() };
+    console.error("Error fetching stories:", error);
+    return { stories: [], count: 0, timestamp: new Date().toISOString() };
   }
 }

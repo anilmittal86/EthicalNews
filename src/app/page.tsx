@@ -1,127 +1,125 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { NewsItem, BiasAnalysis } from "@/lib/types";
+import { StoryCluster } from "@/lib/types";
 
-function BiasBadge({ level }: { level: "low" | "medium" | "high" }) {
-  const colors = {
-    low: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
-    medium: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300",
-    high: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300",
-  };
-
-  const labels = {
-    low: "Low Bias",
-    medium: "Medium Bias",
-    high: "High Bias",
+function StoryCard({ story }: { story: StoryCluster }) {
+  const formatSources = (sources: string[]) => {
+    if (sources.length <= 3) {
+      return sources.join(" • ");
+    }
+    return `${sources.slice(0, 2).join(" • ")} • ${sources.length - 2} more`;
   };
 
   return (
-    <span className={`px-2 py-1 text-xs font-medium rounded-full ${colors[level]}`}>
-      {labels[level]}
-    </span>
-  );
-}
+    <article className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 overflow-hidden hover:shadow-md transition-shadow">
+      <div className="p-6">
+        <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-3">
+          {story.title}
+        </h2>
 
-function SensationalBadge() {
-  return (
-    <span className="px-2 py-1 text-xs font-medium rounded-full bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300">
-      Sensationalist
-    </span>
-  );
-}
+        <p className="text-gray-600 dark:text-gray-300 leading-relaxed mb-4">
+          {story.summary}
+        </p>
 
-function NewsCard({ item }: { item: NewsItem }) {
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMins / 60);
-
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    return date.toLocaleDateString();
-  };
-
-  const biasAnalysis = item.biasAnalysis as BiasAnalysis | undefined;
-
-  return (
-    <article className="bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800 p-5 hover:shadow-md transition-shadow">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1 min-w-0">
-          <a
-            href={item.link}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-lg font-semibold text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400 line-clamp-2"
-          >
-            {item.title}
-          </a>
-          <div className="flex items-center gap-3 mt-2 text-sm text-gray-500 dark:text-gray-400">
-            <span className="font-medium text-gray-700 dark:text-gray-300">
-              {item.source}
-            </span>
-            <span>•</span>
-            <time>{formatDate(item.pubDate)}</time>
-          </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-gray-500 dark:text-gray-400">
+          <span className="font-medium">
+            Sources: {formatSources(story.sources)}
+          </span>
         </div>
-        <div className="flex flex-col gap-2 items-end shrink-0">
-          {biasAnalysis && <BiasBadge level={biasAnalysis.biasLevel} />}
-          {biasAnalysis?.isSensationalist && <SensationalBadge />}
-        </div>
-      </div>
 
-      {biasAnalysis && (
-        <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
-          <div className="flex items-start gap-2">
-            <svg
-              className="w-5 h-5 text-gray-400 mt-0.5 shrink-0"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+        <div className="mt-5 pt-4 border-t border-gray-100 dark:border-gray-800 flex flex-wrap gap-3">
+          {story.articles.slice(0, 3).map((article, idx) => (
+            <a
+              key={idx}
+              href={article.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              {biasAnalysis.biasNote}
-            </p>
-          </div>
-          {biasAnalysis.indicators.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1">
-              {biasAnalysis.indicators.map((indicator, idx) => (
-                <span
-                  key={idx}
-                  className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded"
-                >
-                  {indicator}
-                </span>
-              ))}
-            </div>
+              <span>{article.source}</span>
+              <svg
+                className="w-3 h-3"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                />
+              </svg>
+            </a>
+          ))}
+          {story.articles.length > 3 && (
+            <span className="text-sm text-gray-500 dark:text-gray-400 self-center px-2">
+              +{story.articles.length - 3} more sources
+            </span>
           )}
         </div>
-      )}
+
+        {story.showBiasNote && story.biasNote && (
+          <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
+            <details className="group">
+              <summary className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 cursor-pointer list-none">
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <span>Coverage note</span>
+                <svg
+                  className="w-4 h-4 transition-transform group-open:rotate-180"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 9l-7 7-7-7"
+                  />
+                </svg>
+              </summary>
+              <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 pl-6">
+                {story.biasNote}
+              </p>
+            </details>
+          </div>
+        )}
+      </div>
     </article>
   );
 }
 
 function LoadingSkeleton() {
   return (
-    <div className="space-y-4">
-      {[...Array(5)].map((_, i) => (
+    <div className="space-y-6">
+      {[...Array(3)].map((_, i) => (
         <div
           key={i}
-          className="bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800 p-5 animate-pulse"
+          className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 animate-pulse"
         >
-          <div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-3/4 mb-3" />
-          <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/4" />
-          <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
+          <div className="h-7 bg-gray-200 dark:bg-gray-700 rounded w-3/4 mb-4" />
+          <div className="space-y-2">
             <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-full" />
+            <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-5/6" />
+          </div>
+          <div className="mt-4 h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/3" />
+          <div className="mt-4 flex gap-3">
+            <div className="h-10 bg-gray-200 dark:bg-gray-700 rounded w-28" />
+            <div className="h-10 bg-gray-200 dark:bg-gray-700 rounded w-28" />
           </div>
         </div>
       ))}
@@ -131,7 +129,7 @@ function LoadingSkeleton() {
 
 function ErrorState({ onRetry }: { onRetry: () => void }) {
   return (
-    <div className="bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800 p-8 text-center">
+    <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-8 text-center">
       <svg
         className="w-12 h-12 mx-auto text-red-400 mb-4"
         fill="none"
@@ -146,10 +144,10 @@ function ErrorState({ onRetry }: { onRetry: () => void }) {
         />
       </svg>
       <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
-        Unable to load news
+        Unable to load stories
       </h3>
       <p className="text-gray-500 dark:text-gray-400 mb-4">
-        There was an error loading the news. Please try again.
+        Please check your API configuration and try again.
       </p>
       <button
         onClick={onRetry}
@@ -161,22 +159,52 @@ function ErrorState({ onRetry }: { onRetry: () => void }) {
   );
 }
 
+function EmptyState({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-8 text-center">
+      <svg
+        className="w-12 h-12 mx-auto text-gray-400 mb-4"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"
+        />
+      </svg>
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
+        No stories available
+      </h3>
+      <p className="text-gray-500 dark:text-gray-400 mb-4">
+        We couldn&apos;t fetch any stories at the moment. Please try again later.
+      </p>
+      <button
+        onClick={onRetry}
+        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+      >
+        Refresh
+      </button>
+    </div>
+  );
+}
+
 export default function Home() {
-  const [news, setNews] = useState<NewsItem[]>([]);
+  const [stories, setStories] = useState<StoryCluster[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
-  const fetchNews = async () => {
+  const fetchStories = async () => {
     setLoading(true);
     setError(false);
     try {
-      const res = await fetch("/api/news-with-analysis", {
-        cache: "no-store",
-      });
+      const res = await fetch("/api/stories", { cache: "no-store" });
       if (!res.ok) throw new Error("Failed to fetch");
       const data = await res.json();
-      setNews(data.news);
+      setStories(data.stories);
       setLastUpdated(new Date().toLocaleTimeString());
     } catch (err) {
       console.error(err);
@@ -187,13 +215,13 @@ export default function Home() {
   };
 
   useEffect(() => {
-    fetchNews();
+    fetchStories();
   }, []);
 
   return (
     <div className="min-h-screen">
       <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto px-4 py-4">
+        <div className="max-w-3xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
@@ -216,7 +244,7 @@ export default function Home() {
                   EthicalNews
                 </h1>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Unbiased Finance & Markets
+                  Finance & Markets
                 </p>
               </div>
             </div>
@@ -227,7 +255,7 @@ export default function Home() {
                 </span>
               )}
               <button
-                onClick={fetchNews}
+                onClick={fetchStories}
                 disabled={loading}
                 className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
                 title="Refresh"
@@ -251,84 +279,45 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-4 py-8">
+      <main className="max-w-3xl mx-auto px-4 py-8">
         <div className="mb-6">
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
-            Finance & Stock Markets
+            Today&apos;s Briefing
           </h2>
           <p className="text-gray-600 dark:text-gray-400">
-            Top headlines from trusted sources, analyzed for bias and sensationalism.
+            Top stories from trusted sources, curated for balanced coverage.
           </p>
         </div>
 
         {loading && <LoadingSkeleton />}
 
-        {error && <ErrorState onRetry={fetchNews} />}
+        {error && <ErrorState onRetry={fetchStories} />}
 
-        {!loading && !error && news.length === 0 && (
-          <div className="bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800 p-8 text-center">
-            <svg
-              className="w-12 h-12 mx-auto text-gray-400 mb-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"
-              />
-            </svg>
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
-              No news available
-            </h3>
-            <p className="text-gray-500 dark:text-gray-400 mb-4">
-              We couldn&apos;t fetch any news at the moment. Please try again later.
-            </p>
-            <button
-              onClick={fetchNews}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              Refresh
-            </button>
-          </div>
+        {!loading && !error && stories.length === 0 && (
+          <EmptyState onRetry={fetchStories} />
         )}
 
-        {!loading && !error && news.length > 0 && (
+        {!loading && !error && stories.length > 0 && (
           <>
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-sm text-gray-500 dark:text-gray-400">
-                {news.length} articles
-              </span>
-              <div className="flex items-center gap-4 text-xs">
-                <span className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-green-500" />
-                  <span className="text-gray-500 dark:text-gray-400">Low Bias</span>
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-yellow-500" />
-                  <span className="text-gray-500 dark:text-gray-400">Medium Bias</span>
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-red-500" />
-                  <span className="text-gray-500 dark:text-gray-400">High Bias</span>
-                </span>
-              </div>
-            </div>
-            <div className="space-y-4">
-              {news.map((item, index) => (
-                <NewsCard key={`${item.link}-${index}`} item={item} />
+            <div className="space-y-6">
+              {stories.map((story) => (
+                <StoryCard key={story.id} story={story} />
               ))}
+            </div>
+
+            <div className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-800 text-center">
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Showing {stories.length} stories from {stories.reduce((acc, s) => acc + s.sourceCount, 0)} sources
+              </p>
             </div>
           </>
         )}
       </main>
 
       <footer className="border-t border-gray-200 dark:border-gray-800 mt-12">
-        <div className="max-w-4xl mx-auto px-4 py-6">
+        <div className="max-w-3xl mx-auto px-4 py-6">
           <p className="text-center text-sm text-gray-500 dark:text-gray-400">
-            EthicalNews uses AI to analyze news for bias. Always verify information from multiple sources.
+            Curated from trusted financial news sources.
           </p>
         </div>
       </footer>
