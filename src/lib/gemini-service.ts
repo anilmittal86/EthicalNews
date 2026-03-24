@@ -80,25 +80,46 @@ async function callGemini(prompt: string): Promise<string> {
   return result.response.text().trim();
 }
 
+function parseClusterResponse(text: string): { clusters: Array<{ title: string; headlineIndices: number[]; keyEvent: string }> } {
+  try {
+    const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
+    let parsed = JSON.parse(cleaned);
+    
+    if (Array.isArray(parsed)) {
+      return {
+        clusters: parsed.map((item) => ({
+          title: item.title || "News Update",
+          headlineIndices: item.headlineIndices || item.indices || [],
+          keyEvent: item.keyEvent || item.event || "",
+        }))
+      };
+    }
+    
+    if (parsed.clusters && Array.isArray(parsed.clusters)) {
+      return {
+        clusters: parsed.clusters.map((item: any) => ({
+          title: item.title || "News Update",
+          headlineIndices: item.headlineIndices || item.indices || [],
+          keyEvent: item.keyEvent || item.event || "",
+        }))
+      };
+    }
+    
+    return { clusters: [] };
+  } catch (error) {
+    console.error("JSON parse error:", error);
+    return { clusters: [] };
+  }
+}
+
 function parseJsonResponse<T>(text: string, defaultValue: T): T {
   try {
     const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
-    const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      if (Array.isArray(parsed)) {
-        return parsed.map((item) => ({
-          title: item.title || "",
-          headlineIndices: item.headlineIndices || item.indices || [],
-          keyEvent: item.keyEvent || item.event || "",
-        })) as unknown as T;
-      }
-      return parsed as T;
-    }
+    return JSON.parse(cleaned) as T;
   } catch (error) {
     console.error("JSON parse error:", error);
+    return defaultValue;
   }
-  return defaultValue;
 }
 
 async function clusterWithRetry(news: NewsItem[], retryCount = 0): Promise<ClusterResult> {
@@ -116,7 +137,7 @@ async function clusterWithRetry(news: NewsItem[], retryCount = 0): Promise<Clust
     const response = await callGemini(prompt);
     console.log(`Clustering response (attempt ${retryCount + 1}):`, response.substring(0, 300));
 
-    const result = parseJsonResponse<ClusterResult>(response, { clusters: [] });
+    const result = parseClusterResponse(response);
 
     if (!result.clusters || result.clusters.length === 0 || !Array.isArray(result.clusters)) {
       if (retryCount < 2) {
